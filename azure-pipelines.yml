@@ -1,0 +1,65 @@
+trigger:
+- main
+
+pool:
+  name: 'ubuntu-pfe'
+
+variables:
+  nodeVersion: '14.21.3'
+  webAppName: 'autoGuardapp'
+  azureSubscription: 'pfe'
+
+stages:
+- stage: Build
+  displayName: 'Installer et Archiver'
+  jobs:
+  - job: BuildJob
+    steps:
+    - task: UseNode@1
+      inputs:
+        version: $(nodeVersion)
+      displayName: 'Installer Node.js'
+
+    - script: |
+        npm install
+      displayName: 'Installer les dépendances'
+
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+      displayName: 'Archiver les fichiers'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
+        artifactName: 'backend-app'
+      displayName: 'Publier l''application backend'
+
+- stage: Deploy
+  displayName: 'Deploy Backend'
+  dependsOn: Build
+  jobs:
+  - job: DeployJob
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifactName: 'backend-app'
+        targetPath: '$(System.DefaultWorkingDirectory)'
+      displayName: 'Télécharger l''artefact'
+
+    - task: AzureRmWebAppDeployment@4
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: $(azureSubscription)
+        appType: 'webApp'
+        WebAppName: $(webAppName)
+        package: '$(System.DefaultWorkingDirectory)/app.zip'
+        RuntimeStack: 'NODE|$(nodeVersion)'
+        StartupCommand: 'npm start'
+      env:
+        NODE_ENV: $(NODE_ENV)
+        MONGODB_CONNECTION_STRING: $(MONGODB_CONNECTION_STRING)
+      displayName: 'Déployer sur Azure App Service'
