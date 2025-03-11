@@ -3,14 +3,27 @@ pipeline {
 
     environment {
         IMAGE_NAME = "rihab26/nodejs-app"
-        REGISTRY = "docker.io"  
+        REGISTRY = "docker.io"
         GIT_REPO = "https://github.com/RihabHaddad/DevSecOps-pipeline.git"
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: "${GIT_REPO}"
+                script {
+                    try {
+                        checkout scm: [
+                            $class: 'GitSCM',
+                            branches: [[name: '*/main']],
+                            userRemoteConfigs: [[
+                                url: "${GIT_REPO}",
+                                credentialsId: 'github-cred' 
+                            ]]
+                        ]
+                    } catch (Exception e) {
+                        error "Échec du checkout: ${e.message}"
+                    }
+                }
             }
         }
 
@@ -18,34 +31,61 @@ pipeline {
             steps {
                 script {
                     withSonarQubeEnv('SonarQube') {
-    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-        sh "sonar-scanner -Dsonar.projectKey=nodejs-app -Dsonar.sources=. -Dsonar.login=$SONAR_TOKEN"
-    }
-}
+                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                            try {
+                                sh '''
+                                    sonar-scanner \
+                                    -Dsonar.projectKey=nodejs-app \
+                                    -Dsonar.sources=. \
+                                    -Dsonar.login=$SONAR_TOKEN
+                                '''
+                            } catch (Exception e) {
+                                error "Échec de l'analyse SonarQube: ${e.message}"
+                            }
+                        }
+                    }
+                }
             }
         }
 
         stage('Security Scan with Trivy') {
             steps {
-                sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
+                script {
+                    try {
+                        sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
+                    } catch (Exception e) {
+                        error "Échec du scan Trivy: ${e.message}"
+                    }
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${IMAGE_NAME}:latest ."
+                script {
+                    try {
+                        sh "docker build -t ${IMAGE_NAME}:latest ."
+                    } catch (Exception e) {
+                        error "Échec du build Docker: ${e.message}"
+                    }
+                }
             }
         }
 
         stage('Push Image to Docker Hub') {
             steps {
-                withDockerRegistry([credentialsId: 'docker-hub-cred', url: "https://${REGISTRY}"]) {
-                    sh "docker push ${IMAGE_NAME}:latest"
+                script {
+                    withDockerRegistry([credentialsId: 'docker-hub-cred', url: "https://${REGISTRY}"]) {
+                        try {
+                            sh "docker push ${IMAGE_NAME}:latest"
+                        } catch (Exception e) {
+                            error "Échec du push Docker: ${e.message}"
+                        }
+                    }
                 }
             }
         }
-
-        
     }
-}
+
+   
 }
