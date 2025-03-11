@@ -17,7 +17,7 @@ pipeline {
                             branches: [[name: '*/main']],
                             userRemoteConfigs: [[
                                 url: "${GIT_REPO}",
-                                credentialsId: 'github-cred' 
+                                credentialsId: 'github-credentials' 
                             ]]
                         ]
                     } catch (Exception e) {
