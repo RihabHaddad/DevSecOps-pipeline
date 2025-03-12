@@ -34,6 +34,7 @@ pipeline {
                         withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                             try {
                                 sh '''
+                                    #!/bin/bash
                                     export PATH=$PATH:/opt/sonar-scanner/bin
                                     sonar-scanner \
                                     -Dsonar.projectKey=nodejs-app \
