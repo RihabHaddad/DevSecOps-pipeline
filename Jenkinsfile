@@ -27,26 +27,23 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis') {
-            steps {
-                script {
-                    withSonarQubeEnv('SonarQube') {
-                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                            try {
-                                sh '''
-                                    sonar-scanner \
-                                    -Dsonar.projectKey=nodejs-app \
-                                    -Dsonar.sources=. \
-                                    -Dsonar.login=$SONAR_TOKEN
-                                '''
-                            } catch (Exception e) {
-                                error "Échec de l'analyse SonarQube: ${e.message}"
-                            }
-                        }
-                    }
+       stage('SonarQube Analysis') {
+    steps {
+        script {
+            def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+            withSonarQubeEnv('SonarQube') {
+                withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                    sh """
+                    ${scannerHome}/bin/sonar-scanner \
+                    -Dsonar.projectKey=nodejs-app \
+                    -Dsonar.sources=. \
+                    -Dsonar.login=$SONAR_TOKEN
+                    """
                 }
             }
         }
+    }
+}
 
         stage('Security Scan with Trivy') {
             steps {
