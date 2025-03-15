@@ -37,6 +37,7 @@ pipeline {
                     ${scannerHome}/bin/sonar-scanner \
                     -Dsonar.projectKey=nodejs-app \
                     -Dsonar.sources=. \
+                    -Dsonar.exclusions=**/*.java \
                     -Dsonar.login=$SONAR_TOKEN
                     """
                 }
