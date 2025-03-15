@@ -73,8 +73,9 @@ pipeline {
         stage('Push Image to Docker Hub') {
             steps {
                 script {
-                    withDockerRegistry([credentialsId: 'docker-hub-cred', url: "https://${REGISTRY}"]) {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         try {
+                            sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                             sh "docker push ${IMAGE_NAME}:latest"
                         } catch (Exception e) {
                             error "Échec du push Docker: ${e.message}"
