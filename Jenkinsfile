@@ -5,6 +5,7 @@ pipeline {
         IMAGE_NAME = "rihab26/nodejs-app"
         REGISTRY = "docker.io"
         GIT_REPO = "https://github.com/RihabHaddad/DevSecOps-pipeline.git"
+        GITOPS_REPO = "git@github.com:RihabHaddad/GitOps.git"
     }
 
     stages {
@@ -27,24 +28,24 @@ pipeline {
             }
         }
 
-       stage('SonarQube Analysis') {
-    steps {
-        script {
-            def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-            withSonarQubeEnv('SonarQube') {
-                withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                    sh """
-                    ${scannerHome}/bin/sonar-scanner \
-                    -Dsonar.projectKey=nodejs-app \
-                    -Dsonar.sources=. \
-                    -Dsonar.exclusions=**/*.java \
-                    -Dsonar.login=$SONAR_TOKEN
-                    """
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    withSonarQubeEnv('SonarQube') {
+                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                            sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=nodejs-app \
+                            -Dsonar.sources=. \
+                            -Dsonar.exclusions=**/*.java \
+                            -Dsonar.login=$SONAR_TOKEN
+                            """
+                        }
+                    }
                 }
             }
         }
-    }
-}
 
         stage('Security Scan with Trivy') {
             steps {
@@ -84,7 +85,40 @@ pipeline {
                 }
             }
         }
-    }
 
-   
+        stage('GitOps Update') {
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                        try {
+                            sh "git clone ${GITOPS_REPO} temp-repo"
+                            dir('temp-repo') {
+                                sh "sed -i 's|imageTag:.*|imageTag: latest|' k8s/deployment.yaml"
+                                sh "git config --global user.email 'rihab.haddad@esprit.tn'"
+                                sh "git config --global user.name 'Rihab Haddad'"
+                                sh "git add ."
+                                sh "git commit -m 'Update image tag to latest'"
+                                sh "git push origin main"
+                            }
+                        } catch (Exception e) {
+                            error "Échec de la mise à jour du repo GitOps: ${e.message}"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Sync ArgoCD') {
+            steps {
+                script {
+                    try {
+                        sh "argocd app sync my-app --grpc-web"
+                        sh "argocd app wait my-app --sync-status Synced --operation-state Healthy"
+                    } catch (Exception e) {
+                        error "Échec de la synchronisation ArgoCD: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
 }
