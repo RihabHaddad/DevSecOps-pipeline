@@ -12,17 +12,15 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 script {
-                    try {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         checkout scm: [
                             $class: 'GitSCM',
                             branches: [[name: '*/main']],
                             userRemoteConfigs: [[
                                 url: "${GIT_REPO}",
-                                credentialsId: 'github-credentials' 
+                                credentialsId: 'github-credentials'
                             ]]
                         ]
-                    } catch (Exception e) {
-                        error "Échec du checkout: ${e.message}"
                     }
                 }
             }
@@ -50,10 +48,8 @@ pipeline {
         stage('Security Scan with Trivy') {
             steps {
                 script {
-                    try {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
-                    } catch (Exception e) {
-                        error "Échec du scan Trivy: ${e.message}"
                     }
                 }
             }
@@ -62,10 +58,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    try {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         sh "docker build -t ${IMAGE_NAME}:latest ."
-                    } catch (Exception e) {
-                        error "Échec du build Docker: ${e.message}"
                     }
                 }
             }
@@ -75,11 +69,9 @@ pipeline {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'docker-hub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        try {
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                             sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                             sh "docker push ${IMAGE_NAME}:latest"
-                        } catch (Exception e) {
-                            error "Échec du push Docker: ${e.message}"
                         }
                     }
                 }
@@ -90,18 +82,24 @@ pipeline {
             steps {
                 script {
                     withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                        try {
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                            sh "rm -rf temp-repo" 
                             sh "git clone ${GITOPS_REPO} temp-repo"
                             dir('temp-repo') {
                                 sh "sed -i 's|imageTag:.*|imageTag: latest|' k8s/deployment.yaml"
                                 sh "git config --global user.email 'rihab.haddad@esprit.tn'"
                                 sh "git config --global user.name 'Rihab Haddad'"
-                                sh "git add ."
-                                sh "git commit -m 'Update image tag to latest'"
-                                sh "git push origin main"
+
+                                sh "git status"
+                                def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
+                                if (changes) {
+                                    sh "git add ."
+                                    sh "git commit -m 'Update image tag to latest'"
+                                    sh "git push origin main"
+                                } else {
+                                    echo "Aucune modification détectée, pas de commit."
+                                }
                             }
-                        } catch (Exception e) {
-                            error "Échec de la mise à jour du repo GitOps: ${e.message}"
                         }
                     }
                 }
@@ -111,11 +109,9 @@ pipeline {
         stage('Sync ArgoCD') {
             steps {
                 script {
-                    try {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         sh "argocd app sync my-app --grpc-web"
                         sh "argocd app wait my-app --sync-status Synced --operation-state Healthy"
-                    } catch (Exception e) {
-                        error "Échec de la synchronisation ArgoCD: ${e.message}"
                     }
                 }
             }
