@@ -7,7 +7,7 @@ const server = http.createServer(app);
 
 const kafkaConf = {
     'group.id': 'my-consumer-group',
-    'metadata.broker.list': '192.168.136.6:9092'
+    'metadata.broker.list': '192.168.136.7:9092'
 };
 
 const topicName = 'rawdata';
