@@ -111,7 +111,6 @@ pipeline {
                 script {
                     catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         sh "argocd app sync nodejs-app --grpc-web"
-                        sh "argocd app wait nodejs-app --sync-status Synced --operation-state Healthy"
                     }
                 }
             }
