@@ -1,4 +1,4 @@
 {
-    "MONGODB_CONNECTION_STRING": "mongodb://root:rootpassword@192.168.136.7:27017/"
+    "MONGODB_CONNECTION_STRING": "mongodb://localhost:27017/"
   }
   

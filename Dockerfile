@@ -1,23 +1,28 @@
-FROM node:18-alpine
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    bash \
-    libtool \
-    autoconf \
-    automake \
-    nasm \
-    pkgconfig \
-    lz4 \
-    zlib \
-    openssl-dev \
-    librdkafka-dev \
-    alpine-sdk
+# Utiliser une version de Node.js avec une version plus récente de Debian
+FROM node:18-bullseye
+
+# Répertoire de travail
 WORKDIR /app
+
+# Copier les fichiers package.json et package-lock.json dans le conteneur
 COPY package*.json ./
-RUN rm -rf node_modules package-lock.json && npm cache clean --force
-RUN npm install --build-from-source --legacy-peer-deps
+
+# Installer les dépendances nécessaires
+RUN apt-get update && apt-get install -y \
+    python3 \
+    build-essential \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installer les dépendances npm
+RUN npm install --legacy-peer-deps
+
+# Copier le reste des fichiers du projet dans le conteneur
 COPY . .
-EXPOSE 3000
+
+# Exposer le port de l'application
+EXPOSE 3001
+
+# Démarrer l'application
 CMD ["npm", "start"]

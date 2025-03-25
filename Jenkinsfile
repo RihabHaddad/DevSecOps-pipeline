@@ -18,7 +18,7 @@ pipeline {
                             branches: [[name: '*/main']],
                             userRemoteConfigs: [[
                                 url: "${GIT_REPO}",
-                                credentialsId: 'github-credentials'
+                                credentialsId: 'github-cred'
                             ]]
                         ]
                     }
@@ -68,7 +68,7 @@ pipeline {
         stage('Push Image to Docker Hub') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'docker-hub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                             sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                             sh "docker push ${IMAGE_NAME}:latest"
@@ -111,7 +111,6 @@ pipeline {
                 script {
                     catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                         sh "argocd app sync nodejs-app --grpc-web"
-                        sh "argocd app wait nodejs-app --sync-status Synced --operation-state Healthy"
                     }
                 }
             }
