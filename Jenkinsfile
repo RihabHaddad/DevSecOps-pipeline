@@ -116,4 +116,29 @@ pipeline {
             }
         }
     }
+
+    post {
+        always {
+            script {
+                def buildStatus = currentBuild.currentResult
+                def subject = "Build ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                def body = """
+                    Build Status: ${buildStatus}
+                    Job: ${env.JOB_NAME}
+                    Build Number: ${env.BUILD_NUMBER}
+                    URL: ${env.BUILD_URL}
+                """
+                
+                emailext (
+                    subject: subject,
+                    body: body,
+                    to: 'rihabhaddad26@gmail.com',
+                    from: 'jenkins@example.com',
+                    replyTo: 'noreply@example.com',
+                    mimeType: 'text/html',
+                    recipientProviders: [[$class: 'DevelopersRecipientProvider']]
+                )
+            }
+        }
+    }
 }
