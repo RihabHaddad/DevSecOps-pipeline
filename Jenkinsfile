@@ -26,7 +26,7 @@ pipeline {
             steps {
                 script {
                     env.IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    echo "Image tag will be: ${IMAGE_TAG}"
+                    echo "Image tag to be used: ${IMAGE_TAG}"
                 }
             }
         }
@@ -96,7 +96,7 @@ pipeline {
                             sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
                             sh "git push origin main"
                         } else {
-                            echo "Aucune modification détectée, pas de commit."
+                            echo "No changes detected, skipping commit."
                         }
                     }
                 }
@@ -105,7 +105,9 @@ pipeline {
 
         stage('Sync ArgoCD') {
             steps {
-                sh "argocd app sync nodejs-app --grpc-web"
+                echo "Simulated ArgoCD sync for ${IMAGE_NAME}:${IMAGE_TAG} (replace with actual command if needed)"
+                // Pour exécution réelle :
+                // sh "argocd app sync nodejs-app --grpc-web"
             }
         }
     }
