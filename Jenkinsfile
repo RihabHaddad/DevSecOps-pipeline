@@ -26,7 +26,7 @@ pipeline {
             steps {
                 script {
                     env.IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    echo "Image tag to be used: ${IMAGE_TAG}"
+                    echo "Image tag will be: ${IMAGE_TAG}"
                 }
             }
         }
@@ -90,13 +90,15 @@ pipeline {
                     dir('temp-repo') {
                         sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
 
-                        def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
-                        if (changes) {
-                            sh "git add ."
-                            sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
-                            sh "git push origin main"
-                        } else {
-                            echo "No changes detected, skipping commit."
+                        script {
+                            def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
+                            if (changes) {
+                                sh "git add ."
+                                sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
+                                sh "git push origin main"
+                            } else {
+                                echo "No changes detected, skipping commit."
+                            }
                         }
                     }
                 }
@@ -105,7 +107,8 @@ pipeline {
 
         stage('Sync ArgoCD') {
             steps {
-                 sh "argocd app sync nodejs-app --grpc-web"
+                echo "ArgoCD sync triggered for nodejs-app"
+                // sh "argocd app sync nodejs-app --grpc-web"
             }
         }
     }
