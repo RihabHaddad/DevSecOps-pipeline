@@ -65,6 +65,16 @@ pipeline {
             }
         }
 
+        stage('Scan Docker Image') {
+            steps {
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${IMAGE_NAME}:latest"
+                    }
+                }
+            }
+        }
+
         stage('Push Image to Docker Hub') {
             steps {
                 script {
@@ -83,7 +93,7 @@ pipeline {
                 script {
                     withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
                         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                            sh "rm -rf temp-repo" 
+                            sh "rm -rf temp-repo"
                             sh "git clone ${GITOPS_REPO} temp-repo"
                             dir('temp-repo') {
                                 sh "sed -i 's|imageTag:.*|imageTag: latest|' k8s/deployment.yaml"
@@ -128,7 +138,7 @@ pipeline {
                     Build Number: ${env.BUILD_NUMBER}
                     URL: ${env.BUILD_URL}
                 """
-                
+               
                 emailext (
                     subject: subject,
                     body: body,
