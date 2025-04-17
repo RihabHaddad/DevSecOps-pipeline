@@ -105,9 +105,7 @@ pipeline {
 
         stage('Sync ArgoCD') {
             steps {
-                echo "Simulated ArgoCD sync for ${IMAGE_NAME}:${IMAGE_TAG} (replace with actual command if needed)"
-                // Pour exécution réelle :
-                // sh "argocd app sync nodejs-app --grpc-web"
+                 sh "argocd app sync nodejs-app --grpc-web"
             }
         }
     }
