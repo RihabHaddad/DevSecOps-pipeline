@@ -11,17 +11,22 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
+                checkout scm: [
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: "${GIT_REPO}",
+                        credentialsId: 'github-cred'
+                    ]]
+                ]
+            }
+        }
+
+        stage('Prepare') {
+            steps {
                 script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        checkout scm: [
-                            $class: 'GitSCM',
-                            branches: [[name: '*/main']],
-                            userRemoteConfigs: [[
-                                url: "${GIT_REPO}",
-                                credentialsId: 'github-cred'
-                            ]]
-                        ]
-                    }
+                    env.IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                    echo "Image tag will be: ${IMAGE_TAG}"
                 }
             }
         }
@@ -33,11 +38,11 @@ pipeline {
                     withSonarQubeEnv('SonarQube') {
                         withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                             sh """
-                            ${scannerHome}/bin/sonar-scanner \
-                            -Dsonar.projectKey=nodejs-app \
-                            -Dsonar.sources=. \
-                            -Dsonar.exclusions=**/*.java \
-                            -Dsonar.login=$SONAR_TOKEN
+                                ${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=nodejs-app \
+                                -Dsonar.sources=. \
+                                -Dsonar.exclusions=**/*.java \
+                                -Dsonar.login=$SONAR_TOKEN
                             """
                         }
                     }
@@ -45,71 +50,53 @@ pipeline {
             }
         }
 
-        stage('Security Scan with Trivy') {
+        stage('Security Scan with Trivy (FS)') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
-                    }
-                }
+                sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "docker build -t ${IMAGE_NAME}:latest ."
-                    }
-                }
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
             }
         }
 
         stage('Scan Docker Image') {
+            options {
+                timeout(time: 5, unit: 'MINUTES')
+            }
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${IMAGE_NAME}:latest"
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
         stage('Push Image to Docker Hub') {
             steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                            sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                            sh "docker push ${IMAGE_NAME}:latest"
-                        }
-                    }
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
         stage('GitOps Update') {
             steps {
-                script {
-                    withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                            sh "rm -rf temp-repo"
-                            sh "git clone ${GITOPS_REPO} temp-repo"
-                            dir('temp-repo') {
-                                sh "sed -i 's|imageTag:.*|imageTag: latest|' k8s/deployment.yaml"
-                                sh "git config --global user.email 'rihab.haddad@esprit.tn'"
-                                sh "git config --global user.name 'Rihab Haddad'"
+                withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                    sh "rm -rf temp-repo"
+                    sh "git clone ${GITOPS_REPO} temp-repo"
+                    dir('temp-repo') {
+                        sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
 
-                                sh "git status"
-                                def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
-                                if (changes) {
-                                    sh "git add ."
-                                    sh "git commit -m 'Update image tag to latest'"
-                                    sh "git push origin main"
-                                } else {
-                                    echo "Aucune modification détectée, pas de commit."
-                                }
-                            }
+                        def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
+                        if (changes) {
+                            sh "git add ."
+                            sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
+                            sh "git push origin main"
+                        } else {
+                            echo "Aucune modification détectée, pas de commit."
                         }
                     }
                 }
@@ -118,11 +105,7 @@ pipeline {
 
         stage('Sync ArgoCD') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "argocd app sync nodejs-app --grpc-web"
-                    }
-                }
+                sh "argocd app sync nodejs-app --grpc-web"
             }
         }
     }
@@ -133,20 +116,19 @@ pipeline {
                 def buildStatus = currentBuild.currentResult
                 def subject = "Build ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
                 def body = """
-                    Build Status: ${buildStatus}
-                    Job: ${env.JOB_NAME}
-                    Build Number: ${env.BUILD_NUMBER}
-                    URL: ${env.BUILD_URL}
+                    Build Status: ${buildStatus}<br>
+                    Job: ${env.JOB_NAME}<br>
+                    Build Number: ${env.BUILD_NUMBER}<br>
+                    URL: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a>
                 """
-               
+
                 emailext (
                     subject: subject,
                     body: body,
                     to: 'rihabhaddad26@gmail.com',
                     from: 'jenkins@example.com',
                     replyTo: 'noreply@example.com',
-                    mimeType: 'text/html',
-                    recipientProviders: [[$class: 'DevelopersRecipientProvider']]
+                    mimeType: 'text/html'
                 )
             }
         }
