@@ -6,17 +6,24 @@ pipeline {
         REGISTRY = "docker.io"
         GIT_REPO = "https://github.com/RihabHaddad/DevSecOps-pipeline.git"
         GITOPS_REPO = "git@github.com:RihabHaddad/GitOps.git"
+        VAULT_SECRET_GITHUB = 'secret/github'
+        VAULT_SECRET_DOCKERHUB = 'secret/dockerhub'
+        VAULT_SECRET_SONAR = 'secret/sonarqube'
+        VAULT_SECRET_GITOPS = 'secret/gitops'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
+                vault {
+                    vaultSecrets = [[path: "${VAULT_SECRET_GITHUB}", secretValues: [[envVar: 'GITHUB_TOKEN', vaultKey: 'token']]]]
+                }
                 checkout scm: [
                     $class: 'GitSCM',
                     branches: [[name: '*/main']],
                     userRemoteConfigs: [[
                         url: "${GIT_REPO}",
-                        credentialsId: 'github-cred'
+                        credentials: [username: 'rihabhaddad', password: "${GITHUB_TOKEN}"]
                     ]]
                 ]
             }
@@ -33,18 +40,19 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
+                vault {
+                    vaultSecrets = [[path: "${VAULT_SECRET_SONAR}", secretValues: [[envVar: 'SONAR_TOKEN', vaultKey: 'token']]]]
+                }
                 script {
                     def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                     withSonarQubeEnv('SonarQube') {
-                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                            sh """
-                                ${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.projectKey=nodejs-app \
-                                -Dsonar.sources=. \
-                                -Dsonar.exclusions=**/*.java \
-                                -Dsonar.login=$SONAR_TOKEN
-                            """
-                        }
+                        sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=nodejs-app \
+                            -Dsonar.sources=. \
+                            -Dsonar.exclusions=**/*.java \
+                            -Dsonar.login=$SONAR_TOKEN
+                        """
                     }
                 }
             }
@@ -78,13 +86,6 @@ pipeline {
                         """,
                         returnStatus: true
                     )
-
-                    if (exitCode != 0) {
-                        echo " Trivy found vulnerabilities. Check the report below:"
-                    } else {
-                        echo " No critical vulnerabilities found in image."
-                    }
-
                     sh 'cat trivy-report.txt'
                 }
             }
@@ -92,30 +93,35 @@ pipeline {
 
         stage('Push Image to Docker Hub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                vault {
+                    vaultSecrets = [[path: "${VAULT_SECRET_DOCKERHUB}", secretValues: [
+                        [envVar: 'DOCKER_USER', vaultKey: 'username'],
+                        [envVar: 'DOCKER_PASS', vaultKey: 'password']
+                    ]]]
                 }
+                sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
-          stage('GitOps Update') {
+        stage('GitOps Update') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                    sh "rm -rf temp-repo"
-                    sh "git clone ${GITOPS_REPO} temp-repo"
-                    dir('temp-repo') {
-                        sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
-
-                        script {
-                            def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
-                            if (changes) {
-                                sh "git add ."
-                                sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
-                                sh "git push origin main"
-                            } else {
-                                echo "No changes detected, skipping commit."
-                            }
+                vault {
+                    vaultSecrets = [[path: "${VAULT_SECRET_GITOPS}", secretValues: [[envVar: 'SSH_KEY', vaultKey: 'key']]]]
+                }
+                sh 'rm -rf temp-repo'
+                sh "mkdir -p ~/.ssh && echo \"$SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa"
+                sh "git clone ${GITOPS_REPO} temp-repo"
+                dir('temp-repo') {
+                    sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
+                    script {
+                        def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
+                        if (changes) {
+                            sh "git add ."
+                            sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
+                            sh "git push origin main"
+                        } else {
+                            echo "No changes detected, skipping commit."
                         }
                     }
                 }
@@ -140,7 +146,6 @@ pipeline {
                     Build Number: ${env.BUILD_NUMBER}<br>
                     URL: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a>
                 """
-
                 emailext (
                     subject: subject,
                     body: body,
