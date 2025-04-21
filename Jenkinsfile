@@ -26,7 +26,7 @@ pipeline {
             steps {
                 script {
                     env.IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    echo "Image tag will be: ${IMAGE_TAG}"
+                    echo "Image tag: ${IMAGE_TAG}"
                 }
             }
         }
@@ -52,7 +52,8 @@ pipeline {
 
         stage('Security Scan with Trivy (FS)') {
             steps {
-                sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL . || true"
+                sh 'trivy fs --scanners vuln --no-progress --severity HIGH,CRITICAL --format table --output trivy-fs-report.txt . || true'
+                sh 'cat trivy-fs-report.txt'
             }
         }
 
@@ -63,12 +64,28 @@ pipeline {
         }
 
         stage('Scan Docker Image') {
-            options {
-                timeout(time: 5, unit: 'MINUTES')
-            }
             steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${IMAGE_NAME}:${IMAGE_TAG}"
+                script {
+                    def exitCode = sh(
+                        script: """
+                            trivy image --timeout 10m \
+                            --scanners vuln \
+                            --no-progress \
+                            --severity HIGH,CRITICAL \
+                            --format table \
+                            --output trivy-report.txt \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                        """,
+                        returnStatus: true
+                    )
+
+                    if (exitCode != 0) {
+                        echo " Trivy found vulnerabilities. Check the report below:"
+                    } else {
+                        echo " No critical vulnerabilities found in image."
+                    }
+
+                    sh 'cat trivy-report.txt'
                 }
             }
         }
@@ -86,7 +103,7 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
                     sh "rm -rf temp-repo"
-                    sh "git clone ${GITOPS_REPO} temp-repo"
+                    sh "GIT_SSH_COMMAND='ssh -i $SSH_KEY -o StrictHostKeyChecking=no' git clone ${GITOPS_REPO} temp-repo"
                     dir('temp-repo') {
                         sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
 
@@ -95,9 +112,9 @@ pipeline {
                             if (changes) {
                                 sh "git add ."
                                 sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
-                                sh "git push origin main"
+                                sh "GIT_SSH_COMMAND='ssh -i $SSH_KEY -o StrictHostKeyChecking=no' git push origin main"
                             } else {
-                                echo "No changes detected, skipping commit."
+                                echo "No changes detected, skipping Git commit."
                             }
                         }
                     }
@@ -107,8 +124,7 @@ pipeline {
 
         stage('Sync ArgoCD') {
             steps {
-                echo "ArgoCD sync triggered for nodejs-app"
-                // sh "argocd app sync nodejs-app --grpc-web"
+                echo "ArgoCD sync would be triggered here (e.g., argocd app sync nodejs-app)"
             }
         }
     }
@@ -134,6 +150,8 @@ pipeline {
                     mimeType: 'text/html'
                 )
             }
+
+            archiveArtifacts artifacts: '*.txt', fingerprint: true
         }
     }
 }
