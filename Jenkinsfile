@@ -15,17 +15,17 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                vault {
-                    vaultSecrets = [[path: "${VAULT_SECRET_GITHUB}", secretValues: [[envVar: 'GITHUB_TOKEN', vaultKey: 'token']]]]
+                withVault([vaultSecrets: [[path: "${VAULT_SECRET_GITHUB}", secretValues: [[envVar: 'GITHUB_TOKEN', vaultKey: 'token']]]]]) {
+                    checkout scm: [
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: "${GIT_REPO}",
+                            credentialsId: '', // Plus besoin ici si token géré via Vault
+                            credentials: [username: 'rihabhaddad', password: "${GITHUB_TOKEN}"]
+                        ]]
+                    ]
                 }
-                checkout scm: [
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: "${GIT_REPO}",
-                        credentials: [username: 'rihabhaddad', password: "${GITHUB_TOKEN}"]
-                    ]]
-                ]
             }
         }
 
@@ -40,19 +40,18 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                vault {
-                    vaultSecrets = [[path: "${VAULT_SECRET_SONAR}", secretValues: [[envVar: 'SONAR_TOKEN', vaultKey: 'token']]]]
-                }
-                script {
-                    def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                    withSonarQubeEnv('SonarQube') {
-                        sh """
-                            ${scannerHome}/bin/sonar-scanner \
-                            -Dsonar.projectKey=nodejs-app \
-                            -Dsonar.sources=. \
-                            -Dsonar.exclusions=**/*.java \
-                            -Dsonar.login=$SONAR_TOKEN
-                        """
+                withVault([vaultSecrets: [[path: "${VAULT_SECRET_SONAR}", secretValues: [[envVar: 'SONAR_TOKEN', vaultKey: 'token']]]]]) {
+                    script {
+                        def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                        withSonarQubeEnv('SonarQube') {
+                            sh """
+                                ${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=nodejs-app \
+                                -Dsonar.sources=. \
+                                -Dsonar.exclusions=**/*.java \
+                                -Dsonar.login=$SONAR_TOKEN
+                            """
+                        }
                     }
                 }
             }
@@ -93,35 +92,33 @@ pipeline {
 
         stage('Push Image to Docker Hub') {
             steps {
-                vault {
-                    vaultSecrets = [[path: "${VAULT_SECRET_DOCKERHUB}", secretValues: [
-                        [envVar: 'DOCKER_USER', vaultKey: 'username'],
-                        [envVar: 'DOCKER_PASS', vaultKey: 'password']
-                    ]]]
+                withVault([vaultSecrets: [[path: "${VAULT_SECRET_DOCKERHUB}", secretValues: [
+                    [envVar: 'DOCKER_USER', vaultKey: 'username'],
+                    [envVar: 'DOCKER_PASS', vaultKey: 'password']
+                ]]]]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
-                sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
         stage('GitOps Update') {
             steps {
-                vault {
-                    vaultSecrets = [[path: "${VAULT_SECRET_GITOPS}", secretValues: [[envVar: 'SSH_KEY', vaultKey: 'key']]]]
-                }
-                sh 'rm -rf temp-repo'
-                sh "mkdir -p ~/.ssh && echo \"$SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa"
-                sh "git clone ${GITOPS_REPO} temp-repo"
-                dir('temp-repo') {
-                    sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
-                    script {
-                        def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
-                        if (changes) {
-                            sh "git add ."
-                            sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
-                            sh "git push origin main"
-                        } else {
-                            echo "No changes detected, skipping commit."
+                withVault([vaultSecrets: [[path: "${VAULT_SECRET_GITOPS}", secretValues: [[envVar: 'SSH_KEY', vaultKey: 'key']]]]]) {
+                    sh 'rm -rf temp-repo'
+                    sh "mkdir -p ~/.ssh && echo \"$SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa"
+                    sh "git clone ${GITOPS_REPO} temp-repo"
+                    dir('temp-repo') {
+                        sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
+                        script {
+                            def changes = sh(script: "git status --porcelain", returnStdout: true).trim()
+                            if (changes) {
+                                sh "git add ."
+                                sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
+                                sh "git push origin main"
+                            } else {
+                                echo "No changes detected, skipping commit."
+                            }
                         }
                     }
                 }
