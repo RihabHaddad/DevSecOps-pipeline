@@ -99,11 +99,11 @@ pipeline {
             }
         }
 
-        stage('GitOps Update') {
+          stage('GitOps Update') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'gitops-ssh-key', keyFileVariable: 'SSH_KEY')]) {
                     sh "rm -rf temp-repo"
-                    sh "GIT_SSH_COMMAND='ssh -i $SSH_KEY -o StrictHostKeyChecking=no' git clone ${GITOPS_REPO} temp-repo"
+                    sh "git clone ${GITOPS_REPO} temp-repo"
                     dir('temp-repo') {
                         sh "sed -i 's|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml"
 
@@ -112,9 +112,9 @@ pipeline {
                             if (changes) {
                                 sh "git add ."
                                 sh "git commit -m 'Update image tag to ${IMAGE_TAG}'"
-                                sh "GIT_SSH_COMMAND='ssh -i $SSH_KEY -o StrictHostKeyChecking=no' git push origin main"
+                                sh "git push origin main"
                             } else {
-                                echo "No changes detected, skipping Git commit."
+                                echo "No changes detected, skipping commit."
                             }
                         }
                     }
