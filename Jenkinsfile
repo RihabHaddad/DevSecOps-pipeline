@@ -16,13 +16,15 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 withVault([vaultSecrets: [[path: "${VAULT_SECRET_GITHUB}", secretValues: [[envVar: 'GITHUB_TOKEN', vaultKey: 'token']]]]]) {
+                    script {
+                        echo "GitHub Token retrieved from Vault"
+                    }
                     checkout scm: [
                         $class: 'GitSCM',
                         branches: [[name: '*/main']],
                         userRemoteConfigs: [[
                             url: "${GIT_REPO}",
-                            credentialsId: '', // Plus besoin ici si token géré via Vault
-                            credentials: [username: 'rihabhaddad', password: "${GITHUB_TOKEN}"]
+                            credentials: [username: 'rihabhaddad', password: "${GITHUB_TOKEN}"] 
                         ]]
                     ]
                 }
