@@ -1,0 +1,105 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "rihab26/nodejs-app"
+        REGISTRY = "docker.io"
+        GIT_REPO = "https://github.com/RihabHaddad/DevSecOps-pipeline.git"
+
+        
+        DOCKER_CREDENTIALS = credentials('docker-username-password') 
+        SONAR_TOKEN = credentials('sonarqube-token') 
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: "${GIT_REPO}"]]])
+            }
+        }
+
+        stage('Prepare') {
+            steps {
+                script {
+                    env.IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'npm install'
+                sh 'npm test'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def scannerHome = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=nodejs-app \
+                            -Dsonar.sources=. \
+                            -Dsonar.exclusions=**/*.java \
+                            -Dsonar.login=$SONAR_TOKEN
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Dependency Scan with Grype') {
+            steps {
+                sh "grype . -o table > grype-deps-report.txt || true"
+                sh 'cat grype-deps-report.txt'
+            }
+        }
+
+        stage('Security Scan with Trivy (FS)') {
+            steps {
+                sh 'trivy fs --scanners vuln --no-progress --severity HIGH,CRITICAL --format table --output trivy-fs-report.txt . || true'
+                sh 'cat trivy-fs-report.txt'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('Scan Docker Image') {
+            steps {
+                sh """
+                    trivy image --timeout 10m \
+                    --scanners vuln \
+                    --no-progress \
+                    --severity HIGH,CRITICAL \
+                    --format table \
+                    --output trivy-report.txt \
+                    ${IMAGE_NAME}:${IMAGE_TAG} || true
+                """
+                sh 'cat trivy-report.txt'
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    sh 'echo $DOCKER_CREDENTIALS_PSW | docker login -u $DOCKER_CREDENTIALS_USR --password-stdin'
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Build Status: ${currentBuild.currentResult}"
+            archiveArtifacts artifacts: '*.txt', fingerprint: true
+        }
+    }
+}
