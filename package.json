@@ -4,7 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "jest tests",
+    "test": "jest",
     "start": "node server.js"
   },
   "author": "",
@@ -27,6 +27,6 @@
     "twilio": "^4.16.0"
   },
   "devDependencies": {
-    "jest": "^30.0.4"
+    "jest": "^29.7.0"
   }
 }
